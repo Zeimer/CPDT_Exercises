@@ -251,193 +251,126 @@ end.
 
 Function nat_cfold (ctx : var -> nat) (e : nat_exp) : nat_exp :=
 match e with
-    | TNConst n => TNConst n
-    | TNBinop op e1 e2 =>
-        match nat_cfold ctx e1, nat_cfold ctx e2 with
-            | TNConst n, TNConst m => TNConst (tbinopDenote op n m)
-            | e1', e2' => TNBinop op e1' e2'
+  | TNConst n => TNConst n
+  | TNBinop op e1 e2 =>
+    match nat_cfold ctx e1, nat_cfold ctx e2 with
+      | TNConst n, TNConst m => TNConst (tbinopDenote op n m)
+      | e1', e2' => TNBinop op e1' e2'
+    end
+  | TNVar v => TNVar v
+  | TNIf b e1 e2 =>
+    match b with
+      | TBConst true => nat_cfold ctx e1
+      | TBConst false => nat_cfold ctx e2
+      | TBBinop op e1' e2' =>
+        match nat_cfold ctx e1', nat_cfold ctx e2' with
+          | TNConst n, TNConst m =>
+            if tbinopDenote op n m
+            then nat_cfold ctx e1
+            else nat_cfold ctx e2
+          | e1'', e2'' => TNIf (TBBinop op e1'' e2'') e1 e2
         end
-    | TNVar v => TNVar v
-    | TNIf b e1 e2 =>
-        match bool_cfold ctx b with
-            | TBConst true => nat_cfold ctx e1
-            | TBConst false => nat_cfold ctx e2
-            | b' => TNIf b' (nat_cfold ctx e1) (nat_cfold ctx e2)
-        end
-end
-with bool_cfold (ctx : var -> nat) (b : bool_exp) : bool_exp :=
-match b with
-    | TBConst b' => TBConst b'
-    | TBBinop op e1 e2 =>
-        match nat_cfold ctx e1, nat_cfold ctx e2 with
-            | TNConst n, TNConst m => TBConst (tbinopDenote op n m)
-            | e1', e2' => TBBinop op e1' e2'
-        end
-end.
-
-Scheme Nat_Bool_mut_ind := Induction for nat_exp Sort Prop
-with Bool_Nat_mut_ind := Induction for bool_exp Sort Prop.
-
-Ltac des :=
-match goal with
-    | |- context [match ?f ?x ?y with _ => _ end] => destruct (f x y)
-    | |- context [if ?f ?x ?y then _ else _] => destruct (f x y)
+    end
 end.
 
 Theorem nat_cfold_correct :
   forall (ctx : var -> nat) (e : nat_exp),
     nat_exp_denote ctx (nat_cfold ctx e) = nat_exp_denote ctx e.
 Proof.
-  intro.
-  induction e using Nat_Bool_mut_ind with
-    (P0 := fun b =>
-      bool_exp_denote ctx (bool_cfold ctx b) = bool_exp_denote ctx b);
-  try (cbn; auto; fail).
-    cbn. destruct (nat_cfold ctx e1), (nat_cfold ctx e2); cbn in *; auto.
-      rewrite nat_cfold_equation. destruct (bool_cfold ctx b).
-        destruct b0. rewrite !nat_exp_denote_equation.
-      
-      rewrite -IHe1. destruct (bool_cfold ctx b).
-      destruct b0.
-        rewrite nat_exp_denote_equation.
-    cbn. induction b.
-      destruct b; auto.
-      repeat des; auto.
-    Focus 2. cbn.
-Restart.
   intros. functional induction nat_cfold ctx e; try (cbn; auto; fail).
-    cbn. rewrite e3 in IHn. rewrite e4 in IHn0. cbn in *. auto.
-    rewrite nat_exp_denote_equation. destruct (nat_cfold ctx e1).
-      rewrite nat_exp_denote_equation. Focus 3.
-    destruct b.
-      destruct b; cbn in *; congruence.
-      des. auto. destruct t. cbn in e3. auto.
-    des; auto.
-    Focus 3. destruct (bool_cfold ctx b). destruct b0; inversion y.
-    Focus 2. des; auto.
-    
-Prove that constant-folding a natural number expression preserves its
-meaning.
+    by rewrite 2!nat_exp_denote_equation -IHn e3 -IHn0 e4.
+    rewrite IHn1 [_ ctx (TNIf _ _ _)]nat_exp_denote_equation.
+      by rewrite bool_exp_denote_equation -IHn e4 -IHn0 e5 e6.
+    rewrite IHn1 [_ ctx (TNIf _ _ _)]nat_exp_denote_equation.
+      rewrite bool_exp_denote_equation -IHn e4 -IHn0 e5 //=.
+      by case: (tbinopDenote op n m) y.
+    rewrite nat_exp_denote_equation [_ ctx (TNIf _ _ _)]nat_exp_denote_equation.
+      by rewrite !bool_exp_denote_equation IHn IHn0.
+Qed.
 
-Eval simpl in texpDenote (TNConst 42).
-Eval simpl in texpDenote (TBConst true).
+(* Ex. 5 *)
+Inductive nevn : Set :=
+    | neZ : nevn
+    | neS : nodd -> nevn
 
-(** *** 2.2.2 Target Language *)
+with nodd : Set :=
+    | noS : nevn -> nodd.
 
-Definition tstack := list type.
-
-Inductive tinstr : tstack -> tstack -> Set :=
-    | TiNConst : forall (ts : tstack), nat -> tinstr ts (Nat :: ts)
-    | TiBConst : forall (ts : tstack), bool -> tinstr ts (Bool :: ts)
-    | TiBinop : forall (t1 t2 t3 : type) (ts : tstack),
-        tbinop t1 t2 t3 -> tinstr (t1 :: t2 :: ts) (t3 :: ts).
-
-Inductive tprog : tstack -> tstack -> Set :=
-    | TNil : forall ts : tstack, tprog ts ts
-    | TCons : forall (ts1 ts2 ts3 : tstack),
-        tinstr ts1 ts2 -> tprog ts2 ts3 -> tprog ts1 ts3.
-
-Arguments TCons [ts1 ts2 ts3] _ _.
-
-Fixpoint vstack (ts : tstack) : Set :=
-match ts with
-    | [] => unit
-    | h :: t => typeDenote h * vstack t
-end%type.
-
-Definition tinstrDenote {ts ts' : tstack} (i : tinstr ts ts')
-    : vstack ts -> vstack ts' :=
-match i with
-    | TiNConst _ n => fun vs => (n, vs)
-    | TiBConst _ b => fun vs => (b, vs)
-    | TiBinop t1 t2 _ _ op => fun vs =>
-        let '(x1, (x2, rest)) := vs in (tbinopDenote op x1 x2, rest)
+Fixpoint wut (n : nat) : nevn + nodd :=
+match n with
+    | 0 => inl neZ
+    | S n' =>
+        match wut n' with
+            | inl e => inr (noS e)
+            | inr o => inl (neS o)
+        end
 end.
 
-Fixpoint tprogDenote {ts ts' : tstack} (p : tprog ts ts')
-    : vstack ts -> vstack ts' :=
-match p with
-    | TNil _ => fun vs => vs
-    | TCons _ _ _ i p' => fun vs => tprogDenote p' (tinstrDenote i vs)
+Definition injective {A B : Type} (f : A -> B) : Prop :=
+  forall x y : A, f x = f y -> x = y.
+
+Theorem wut_pres_S :
+  forall n m : nat, wut (S n) = wut (S m) -> wut n = wut m.
+Proof.
+  elim => [| n' IH] [| m'] //=.
+    by case: (wut m').
+    by case: (wut n').
+    by case: (wut n'); case: (wut m'); inversion 1.
+Qed.
+
+Theorem wut_inj : injective wut.
+Proof.
+  red. elim => [| x' IHx] [| y'] //.
+    cbn. by case: (wut y').
+    cbn. by case: (wut x').
+    move=> H. f_equal. by apply IHx, wut_pres_S.
+Qed.
+
+Definition surjective {A B : Type} (f : A -> B) : Prop :=
+  forall b : B, exists a : A, f a = b.
+
+Scheme nevn_nodd_ind := Induction for nevn Sort Prop
+with nodd_nevn_ind := Induction for nodd Sort Prop.
+
+Theorem wut_sur_nevn :
+  forall e : nevn, exists n : nat, wut n = inl e
+with wut_sur_nodd :
+  forall o : nodd, exists n : nat, wut n = inr o.
+Proof.
+  case => [| o].
+    by exists 0.
+    destruct (wut_sur_nodd o). exists (S x). cbn. by rewrite H.
+  case => [e].
+    destruct (wut_sur_nevn e). exists (S x). cbn. by rewrite H.
+Qed.
+
+Theorem wut_sur : surjective wut.
+Proof.
+  red. case.
+    apply wut_sur_nevn.
+    apply wut_sur_nodd.
+Qed.
+
+Function nevn_add (n m : nevn) : nevn :=
+match n, m with
+    | neZ, _ => m
+    | _, neZ => n
+    | neS o, neS o' => neS (noS (nodd_add o o'))
+end
+with nodd_add (n m : nodd) : nevn :=
+match n, m with
+    | noS e, noS e' => neS (noS (nevn_add e e'))
 end.
 
-(** *** 2.2.3 Translation *)
-
-Fixpoint tconcat {ts1 ts2 ts3 : tstack} (p : tprog ts1 ts2)
-    : tprog ts2 ts3 -> tprog ts1 ts3 :=
-match p with
-    | TNil _ => fun p'' => p''
-    | TCons _ _ _ i p' => fun p'' => TCons i (tconcat p' p'')
-end.
-
-Fixpoint tcompile {t : type} (e : texp t) (ts : tstack)
-    : tprog ts (t :: ts) :=
-match e with
-    | TNConst n => TCons (TiNConst ts n) (TNil _)
-    | TBConst b => TCons (TiBConst ts b) (TNil _)
-    | TBinop _ _ _ op e1 e2 =>
-        tconcat (tcompile e2 _)
-            (tconcat (tcompile e1 _) (TCons (TiBinop _ op) (TNil _)))
-end.
-
-Print tcompile.
-
-Eval simpl in tprogDenote (tcompile (TNConst 42) []) tt.
-Eval simpl in tprogDenote (tcompile (TBinop TTimes (TBinop TPlus (TNConst 42)
-    (TNConst 42)) (TNConst 42)) []) tt.
-
-(** *** 2.2.4 Translation Correctness *)
-
-Theorem tconcat_assoc :
-  forall (ts1 ts2 ts3 ts4 : tstack)
-  (p1 : tprog ts1 ts2) (p2 : tprog ts2 ts3) (p3 : tprog ts3 ts4),
-    tconcat p1 (tconcat p2 p3) = tconcat (tconcat p1 p2) p3.
+Theorem nevn_add_comm :
+  forall n m : nevn, nevn_add n m = nevn_add m n
+with nodd_add_comm :
+  forall n m : nodd, nodd_add n m = nodd_add m n.
 Proof.
-  induction p1; simpl; intros; try rewrite IHp1; trivial.
+  destruct n.
+    cbn. destruct m; cbn; auto.
+    destruct m.
+      reflexivity.
+      rewrite !nevn_add_equation. do 2 f_equal. apply nodd_add_comm.
+  destruct n, m. rewrite !nodd_add_equation. do 2 f_equal. auto.
 Qed.
-
-Theorem tcompile_correct' :
-  forall (t : type) (e : texp t) (ts1 ts2 : tstack) (vs : vstack ts1)
-  (p : tprog (t :: ts1) ts2),
-    tprogDenote (tconcat (tcompile e ts1) p) vs =
-    tprogDenote p (texpDenote e, vs).
-Proof.
-  induction e; simpl; intros.
-    trivial.
-    trivial.
-    repeat rewrite <- tconcat_assoc. rewrite IHe2, IHe1.
-      simpl. trivial.
-Qed.
-
-Theorem tcompile_correct : forall (t : type) (e : texp t),
-    tprogDenote (tcompile e []) tt = (texpDenote e, tt).
-Proof.
-  destruct e; simpl; trivial.
-    repeat rewrite tcompile_correct'. simpl. trivial.
-Qed.
-
-Lemma tconcat_correct :
-  forall (ts1 ts2 ts3 : tstack) (p1 : tprog ts1 ts2) (p2 : tprog ts2 ts3)
-  (vs : vstack ts1),
-    tprogDenote (tconcat p1 p2) vs = tprogDenote p2 (tprogDenote p1 vs).
-Proof.
-  induction p1; simpl; intros; try rewrite IHp1; trivial.
-Qed.
-
-Hint Rewrite tconcat_correct.
-
-Lemma tcompile_correct'' :
-  forall (t : type) (e : texp t) (ts : tstack) (vs : vstack ts),
-    tprogDenote (tcompile e ts) vs = (texpDenote e, vs).
-Proof.
-  induction e; simpl; intros; trivial.
-  repeat rewrite tconcat_correct. simpl. rewrite IHe2, IHe1. trivial.
-Restart.
-  induction e; crush.
-Qed.
-
-Hint Rewrite tcompile_correct''.
-
-Theorem tcompile_correct''' : forall (t : type) (e : texp t),
-    tprogDenote (tcompile e []) tt = (texpDenote e, tt).
-Proof. crush. Qed.
