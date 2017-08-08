@@ -374,3 +374,148 @@ Proof.
       rewrite !nevn_add_equation. do 2 f_equal. apply nodd_add_comm.
   destruct n, m. rewrite !nodd_add_equation. do 2 f_equal. auto.
 Qed.
+
+(* Ex. 6 *)
+
+Inductive nat_tree : Set :=
+    | leaf : nat -> nat_tree
+    | branch : (nat -> nat_tree) -> nat_tree.
+
+Fixpoint increment (t : nat_tree) : nat_tree :=
+match t with
+    | leaf n => leaf (S n)
+    | branch f => branch (fun n : nat => increment (f n))
+end.
+
+Fixpoint leapfrog (i : nat) (t : nat_tree) : nat :=
+match t with
+    | leaf n => n
+    | branch f => leapfrog (S i) (f i)
+end.
+
+Theorem leapfrog_increment :
+  forall (t : nat_tree) (i : nat),
+    leapfrog i (increment t) = S (leapfrog i t).
+Proof.
+  elim; by cbn.
+Qed.
+
+(* Ex. 7 *)
+Module Ex7.
+
+Inductive btree (A : Type) : Type :=
+    | empty : btree A
+    | node : A -> btree A -> btree A -> btree A.
+
+Arguments empty {A}.
+Arguments node [A] _ _ _.
+
+Inductive trexp : Type :=
+    | leaf : nat -> trexp
+    | branch : btree trexp -> trexp.
+
+Fixpoint total (t : trexp) : nat :=
+match t with
+    | leaf n => n
+    | branch bt =>
+      (fix f (bt : btree trexp) : nat :=
+      match bt with
+          | empty => 0
+          | node t' l r => total t' + f l + f r
+      end) bt
+end.
+
+Fixpoint increment (t : trexp) : trexp :=
+match t with
+    | leaf n => leaf (S n)
+    | branch bt => branch (
+      (fix f (bt : btree trexp) : btree trexp :=
+      match bt with
+          | empty => empty 
+          | node t' l r => node (increment t') (f l) (f r)
+      end) bt)
+end.
+
+Fixpoint trexp_ind'
+  (P : trexp -> Prop) (Q : btree trexp -> Prop)
+  (HPleaf : forall n : nat, P (leaf n))
+  (HPbranch : forall bt : btree trexp, Q bt -> P (branch bt))
+  (HQempty : Q empty)
+  (HQnode : forall (t : trexp) (l r : btree trexp),
+    P t -> Q l -> Q r -> Q (node t l r)) (t : trexp) : P t.
+Proof.
+  destruct t.
+    apply HPleaf.
+    apply HPbranch. induction b.
+      apply HQempty.
+      apply HQnode; try assumption.
+        eapply trexp_ind'; eauto.
+Defined.
+
+Goal forall t : trexp, total t <= total (increment t).
+Proof.
+  induction t using trexp_ind' with
+  (Q := fun bt =>
+      let fix i (bt : btree trexp) : btree trexp :=
+      match bt with
+          | empty => empty 
+          | node t' l r => node (increment t') (i l) (i r)
+      end in
+      let fix f (bt : btree trexp) : nat :=
+      match bt with
+          | empty => 0
+          | node t' l r => total t' + f l + f r
+      end in
+      f bt <= f (i bt));
+  cbn; auto.
+  repeat apply plus_le_compat; auto.
+Qed.
+
+(* Ex. 8 *)
+Inductive nat_btree : Set :=
+    | NLeaf : nat_btree
+    | NNode : nat_btree -> nat -> nat_btree -> nat_btree.
+
+Definition pick_NLeaf (t : nat_btree) : Prop :=
+match t with
+    | NLeaf => True
+    | _ => False
+end.
+
+Theorem discr1 :
+  forall (n : nat) (t1 t2 : nat_btree), NLeaf <> NNode t1 n t2.
+Proof.
+  red; intros.
+  by have eq: pick_NLeaf NLeaf = pick_NLeaf (NNode t1 n t2) by rewrite H.
+Qed.
+
+Definition pickl (t : nat_btree) : option nat_btree :=
+match t with
+    | NLeaf => None
+    | NNode l _ _ => Some l
+end.
+
+Definition pickm (t : nat_btree) : option nat :=
+match t with
+    | NLeaf => None
+    | NNode _ m _ => Some m
+end.
+
+Definition pickr (t : nat_btree) : option nat_btree :=
+match t with
+    | NLeaf => None
+    | NNode _ _ r => Some r
+end.
+
+Theorem discr2 :
+  forall (l l' r r' : nat_btree) (m m' : nat),
+    NNode l m r = NNode l' m' r' -> l = l' /\ m = m' /\ r = r'.
+Proof.
+  repeat split.
+    have: pickl (NNode l m r) = pickl (NNode l' m' r') by rewrite H.
+      by inversion 1.
+    have: pickm (NNode l m r) = pickm (NNode l' m' r') by rewrite H.
+      by inversion 1.
+    have: pickr (NNode l m r) = pickr (NNode l' m' r') by rewrite H.
+      by inversion 1.
+Qed.
