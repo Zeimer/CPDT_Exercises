@@ -151,68 +151,116 @@ Proof.
       | |- context [negb ?b] => destruct b; cbn
       | |- context [?b1 || ?b2] => destruct b1, b2
   end; auto.
+Restart.
+  induction f; cbn; intros; auto.
+    try f_equal; auto.
+    try f_equal; auto.
+    try f_equal; auto.
+Admitted.
+
+Inductive nnf_prop : Set :=
+    | nnf_var : var -> nnf_prop
+    | nnf_not : var -> nnf_prop
+    | nnf_and : nnf_prop -> nnf_prop -> nnf_prop
+    | nnf_or : nnf_prop -> nnf_prop -> nnf_prop.
+
+Fixpoint ndenote (truth : var -> bool) (p : nnf_prop) : bool :=
+match p with
+    | nnf_var v => truth v
+    | nnf_not v => negb (truth v)
+    | nnf_and p1 p2 => andb (ndenote truth p1) (ndenote truth p2)
+    | nnf_or p1 p2 => orb (ndenote truth p1) (ndenote truth p2)
+end.
+
+Fixpoint nnf_negate (p : nnf_prop) : nnf_prop :=
+match p with
+    | nnf_var v => nnf_not v
+    | nnf_not v => nnf_var v
+    | nnf_and p1 p2 => nnf_or (nnf_negate p1) (nnf_negate p2)
+    | nnf_or p1 p2 => nnf_and (nnf_negate p1) (nnf_negate p2)
+end.
+
+Lemma nnf_negate_correct :
+  forall (p : nnf_prop) (truth : var -> bool),
+    ndenote truth (nnf_negate p) = negb (ndenote truth p).
+Proof.
+  induction p; intro; cbn;
+  by rewrite ?negb_involutive // IHp1 IHp2 ?negb_andb ?negb_orb.
 Qed.
 
-Function push_not (p : prop) : prop :=
+Function push_not (p : prop) : nnf_prop :=
 match p with
-    | pvar v => pvar v
-    | pnot p' =>
-        match push_not p' with
-            | pnot p'' => p''
-            | pand p1 p2 => por (pnot p1) (pnot p2)
-            | por p1 p2 => pand (pnot p1) (pnot p2)
-            | p'' => pnot p''
-        end
-    | pand p1 p2 => pand (push_not p1) (push_not p2)
-    | por p1 p2 => por (push_not p1) (push_not p2)
+    | pvar v => nnf_var v
+    | pnot p' => nnf_negate (push_not p')
+    | pand p1 p2 => nnf_and (push_not p1) (push_not p2)
+    | por p1 p2 => nnf_or (push_not p1) (push_not p2)
 end.
 
 Lemma push_not_correct :
   forall (truth : var -> bool) (p : prop),
-    pdenote truth (push_not p) = pdenote truth p.
+    ndenote truth (push_not p) = pdenote truth p.
 Proof.
-  intros. functional induction push_not p; cbn; repeat
-  match goal with
-      | H : _ = _ |- _ => rewrite H
-      | H : ?a = _, H' : pdenote _ ?a = _ |- _ => rewrite H in H'
-  end; cbn in *; auto; repeat
-  match goal with
-      | H : context [negb ?b] |- _ => destruct b; cbn in H
-      | |- context [negb ?b] => destruct b; cbn
-      | |- context [?b1 || ?b2] => destruct b1, b2
-  end; cbn in *; auto.
+  intros. functional induction push_not p; cbn; auto;
+  rewrite ?nnf_negate_correct; f_equal; auto.
 Qed.
 
-Function distr_or (p : prop) : prop :=
+Inductive literal : Set :=
+    | pos : var -> literal
+    | neg : var -> literal.
+
+(*Inductive cnf_prop : Set :=
+    | cnf_lit : *)
+
+Function distr_or (p : nnf_prop) : nnf_prop :=
 match p with
-    | pvar v => pvar v
-    | pnot p' => pnot (distr_or p')
-    | pand p1 p2 => pand (distr_or p1) (distr_or p2)
-    | por p1 p2 => let p1' := distr_or p1 in
+    | nnf_var v => nnf_var v
+    | nnf_not v => nnf_not v
+    | nnf_and p1 p2 => nnf_and (distr_or p1) (distr_or p2)
+    | nnf_or p1 p2 => let p1' := distr_or p1 in
         match distr_or p2 with
-            | pand p2_1 p2_2 => pand (por p1' p2_1) (por p1' p2_2)
-            | p2' => por p1' p2'
+            | nnf_and p2_1 p2_2 => nnf_and (nnf_or p1' p2_1) (nnf_or p1' p2_2)
+            | p2' => nnf_or p1' p2'
         end
 end.
 
 Lemma distr_or_correct :
-  forall (truth : var -> bool) (p : prop),
-    pdenote truth (distr_or p) = pdenote truth p.
+  forall (truth : var -> bool) (p : nnf_prop),
+    ndenote truth (distr_or p) = ndenote truth p.
 Proof.
-  intros. functional induction distr_or p; cbn; repeat
-  match goal with
-      | H : _ = _ |- _ => rewrite H
-      | H : ?a = _, H' : pdenote _ ?a = _ |- _ => rewrite H in H'
-  end; cbn in *; auto;
-  match goal with
-      | H : context [negb ?b] |- _ => destruct b; cbn in H
-      | |- context [negb ?b] => destruct b; cbn
-      | |- context [?b1 || ?b2] => destruct b1, b2
-      | |- context [?b1 && ?b2] => destruct b1, b2
-  end; cbn in *; auto.
+  intros. functional induction distr_or p; cbn;
+  rewrite ?IHn ?IHn0; auto.
+    rewrite e0 in IHn0. cbn in IHn0.
+    match goal with
+        | |- context [?b1 || ?b2] => destruct b1, b2
+    end; cbn; auto.
 Qed.
 
-Definition cnf (f : formula) : prop :=
+Function distr_and (p : nnf_prop) : nnf_prop :=
+match p with
+    | nnf_var v => nnf_var v
+    | nnf_not v => nnf_not v
+    | nnf_and p1 p2 =>
+        let p1' := distr_and p1 in
+        match distr_and p2 with
+            | nnf_or p2_1 p2_2 => nnf_or (nnf_and p1' p2_1) (nnf_and p1' p2_2)
+            | p2' => nnf_and p1' p2'
+        end
+    | nnf_or p1 p2 => nnf_or (distr_and p1) (distr_and p2)
+end.
+
+Lemma distr_and_correct :
+  forall (truth : var -> bool) (p : nnf_prop),
+    ndenote truth (distr_and p) = ndenote truth p.
+Proof.
+  intros. functional induction distr_and p; cbn;
+  rewrite ?IHn ?IHn0; auto.
+    rewrite e0 in IHn0. cbn in IHn0.
+    match goal with
+        | |- context [?b1 && ?b2] => destruct b1, b2
+    end; cbn; auto.
+Qed.
+
+(*Definition cnf (f : formula) : prop :=
   distr_or (push_not (unarrow f)).
 
 Lemma cnf_correct :
@@ -260,4 +308,4 @@ Proof.
     by rewrite orb_comm H1.
 Qed.
 
-Fixpoint satisfy (p : prop) : var -> 
+Fixpoint satisfy (p : prop) : var -> *)
