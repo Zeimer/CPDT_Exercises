@@ -151,12 +151,12 @@ Proof.
       | |- context [negb ?b] => destruct b; cbn
       | |- context [?b1 || ?b2] => destruct b1, b2
   end; auto.
-Restart.
+(*Restart.
   induction f; cbn; intros; auto.
     try f_equal; auto.
     try f_equal; auto.
-    try f_equal; auto.
-Admitted.
+    try f_equal; auto.*)
+Qed.
 
 Inductive nnf_prop : Set :=
     | nnf_var : var -> nnf_prop
@@ -208,18 +208,18 @@ Inductive literal : Set :=
     | pos : var -> literal
     | neg : var -> literal.
 
-(*Inductive cnf_prop : Set :=
-    | cnf_lit : *)
-
 Function distr_or (p : nnf_prop) : nnf_prop :=
 match p with
     | nnf_var v => nnf_var v
     | nnf_not v => nnf_not v
     | nnf_and p1 p2 => nnf_and (distr_or p1) (distr_or p2)
-    | nnf_or p1 p2 => let p1' := distr_or p1 in
-        match distr_or p2 with
-            | nnf_and p2_1 p2_2 => nnf_and (nnf_or p1' p2_1) (nnf_or p1' p2_2)
-            | p2' => nnf_or p1' p2'
+    | nnf_or p1 p2 =>
+        match distr_or p1, distr_or p2 with
+            | nnf_and p1_1 p1_2, p2' =>
+                nnf_and (nnf_or p1_1 p2') (nnf_or p1_2 p2')
+            | p1', nnf_and p2_1 p2_2 =>
+                nnf_and (nnf_or p1' p2_1) (nnf_or p1' p2_2)
+            | p1', p2' => nnf_or p1' p2'
         end
 end.
 
@@ -228,11 +228,11 @@ Lemma distr_or_correct :
     ndenote truth (distr_or p) = ndenote truth p.
 Proof.
   intros. functional induction distr_or p; cbn;
-  rewrite ?IHn ?IHn0; auto.
-    rewrite e0 in IHn0. cbn in IHn0.
-    match goal with
-        | |- context [?b1 || ?b2] => destruct b1, b2
-    end; cbn; auto.
+  rewrite ?IHn ?IHn0; auto; repeat 
+  match goal with
+      | H : ?a = _, H' : ndenote _ ?a = _ |- _ => rewrite H in H'; cbn in H'
+      | |- context [?b1 || ?b2] => destruct b1, b2; cbn in *
+  end; auto.
 Qed.
 
 Function distr_and (p : nnf_prop) : nnf_prop :=
@@ -240,10 +240,12 @@ match p with
     | nnf_var v => nnf_var v
     | nnf_not v => nnf_not v
     | nnf_and p1 p2 =>
-        let p1' := distr_and p1 in
-        match distr_and p2 with
-            | nnf_or p2_1 p2_2 => nnf_or (nnf_and p1' p2_1) (nnf_and p1' p2_2)
-            | p2' => nnf_and p1' p2'
+        match distr_and p1, distr_and p2 with
+            | nnf_or p1_1 p1_2, p2' =>
+                nnf_or (nnf_and p1_1 p2') (nnf_and p1_2 p2')
+            | p1', nnf_or p2_1 p2_2 =>
+                nnf_or (nnf_and p1' p2_1) (nnf_and p1' p2_2)
+            | p1', p2' => nnf_and p1' p2'
         end
     | nnf_or p1 p2 => nnf_or (distr_and p1) (distr_and p2)
 end.
@@ -253,19 +255,21 @@ Lemma distr_and_correct :
     ndenote truth (distr_and p) = ndenote truth p.
 Proof.
   intros. functional induction distr_and p; cbn;
-  rewrite ?IHn ?IHn0; auto.
-    rewrite e0 in IHn0. cbn in IHn0.
-    match goal with
-        | |- context [?b1 && ?b2] => destruct b1, b2
-    end; cbn; auto.
+  rewrite ?IHn ?IHn0; auto; repeat 
+  match goal with
+      | H : ?a = _, H' : ndenote _ ?a = _ |- _ => rewrite H in H'; cbn in H'
+      | |- context [?b1 && ?b2] => destruct b1, b2; cbn in *
+  end; auto.
 Qed.
 
-(*Definition cnf (f : formula) : prop :=
+(*Definition s := f_and (f_var 1) (f_var 2).*)
+
+Definition cnf (f : formula) : nnf_prop :=
   distr_or (push_not (unarrow f)).
 
 Lemma cnf_correct :
   forall (truth : var -> bool) (f : formula),
-    pdenote truth (cnf f) = fdenote truth f.
+    ndenote truth (cnf f) = fdenote truth f.
 Proof.
   intros. unfold cnf.
   by rewrite distr_or_correct push_not_correct unarrow_correct.
@@ -275,8 +279,6 @@ Definition empty : var -> bool := fun _ => false.
 
 Definition satisfiable (p : prop) : Prop :=
   exists truth : var -> bool, pdenote truth p = true.
-
-Print prop.
 
 Lemma satisfiable_pvar :
   forall (v : var) (truth : var -> bool),
@@ -296,7 +298,6 @@ Qed.
   forall (p1 p2 : prop) (truth : var -> bool),
     satisfiable p1 -> satisfiable truth p2 -> satisfiable (pand p1 p2).
 Proof.*)
-  
 
 Lemma safisfiable_por :
   forall p1 p2 : prop,
@@ -308,4 +309,114 @@ Proof.
     by rewrite orb_comm H1.
 Qed.
 
-Fixpoint satisfy (p : prop) : var -> *)
+Definition cnf_clause := list literal.
+Definition dnf_clause := list literal.
+
+Require Import List.
+Import ListNotations.
+
+Definition ldenote (truth : var -> bool) (l : literal) : bool :=
+match l with
+    | pos v => truth v
+    | neg v => negb (truth v)
+end.
+
+Fixpoint ccdenote (truth : var -> bool) (cc : cnf_clause) : bool :=
+match cc with
+    | [] => false
+    | h :: t => ldenote truth h || ccdenote truth t
+end.
+
+Lemma ccdenote_app :
+  forall (truth : var -> bool) (c1 c2 : cnf_clause),
+    ccdenote truth (c1 ++ c2) = ccdenote truth c1 || ccdenote truth c2.
+Proof.
+  induction c1; cbn; intro; by rewrite // IHc1 orb_assoc.
+Qed.
+
+Fixpoint dcdenote (truth : var -> bool) (cc : cnf_clause) : bool :=
+match cc with
+    | [] => false
+    | h :: t => ldenote truth h && ccdenote truth t
+end.
+
+Definition cnf_prop : Set := list cnf_clause.
+Definition dnf_prop : Set := list dnf_clause.
+
+Fixpoint cdenote (truth : var -> bool) (p : cnf_prop) : bool :=
+match p with
+    | [] => true
+    | h :: t => ccdenote truth h && cdenote truth t
+end.
+
+Lemma cdenote_app :
+  forall (truth : var -> bool) (p1 p2 : cnf_prop),
+    cdenote truth (p1 ++ p2) = cdenote truth p1 && cdenote truth p2.
+Proof.
+  induction p1; cbn; intro; by rewrite // IHp1 andb_assoc.
+Qed.
+
+Fixpoint ddenote (truth : var -> bool) (p : cnf_prop) : bool :=
+match p with
+    | [] => false
+    | h :: t => dcdenote truth h || ddenote truth t
+end.
+
+Fixpoint toCNF (p : nnf_prop) : cnf_prop :=
+match p with
+    | nnf_var v => [[pos v]]
+    | nnf_not v => [[neg v]]
+    | nnf_and p1 p2 => toCNF p1 ++ toCNF p2
+    | nnf_or p1 p2 => [concat (toCNF p1 ++ toCNF p2)]
+end.
+
+Lemma toCNF_correct :
+  forall (truth : var -> bool) (p : nnf_prop),
+    cdenote truth (toCNF p) = ndenote truth p.
+Proof.
+  induction p; cbn.
+    by rewrite orb_false_r andb_true_r.
+    by rewrite orb_false_r andb_true_r.
+    by rewrite cdenote_app IHp1 IHp2.
+    rewrite concat_app ccdenote_app.
+Abort.
+
+Goal forall (truth : var -> bool) (p : cnf_prop),
+  cdenote truth p = ccdenote truth (concat p).
+Proof.
+  induction p; cbn.
+Abort.
+
+Function toCNF' (p : nnf_prop) : cnf_prop :=
+match p with
+    | nnf_var v => [[pos v]]
+    | nnf_not v => [[neg v]]
+    | nnf_and p1 p2 => toCNF' p1 ++ toCNF' p2
+    | nnf_or p1 p2 =>
+        match distr_or p1, distr_or p2 with
+            | nnf_and p1_1 p1_2, p2' =>
+                nnf_and (nnf_or p1_1 p2') (nnf_or p1_2 p2')
+            | p1', nnf_and p2_1 p2_2 =>
+                nnf_and (nnf_or p1' p2_1) (nnf_or p1' p2_2)
+            | p1', p2' => nnf_or p1' p2'
+        end
+end.
+
+Fixpoint toDNF (p : nnf_prop) : dnf_prop :=
+match p with
+    | nnf_var v => [[pos v]]
+    | nnf_not v => [[neg v]]
+    | nnf_and p1 p2 => [concat (toDNF p1 ++ toDNF p2)]
+    | nnf_or p1 p2 => toDNF p1 ++ toDNF p2
+end.
+
+Definition dnf (f : formula) : nnf_prop :=
+  distr_and (push_not (unarrow f)).
+
+
+Definition s := f_and (f_or (f_var 1) (f_var 2)) (f_var 3).
+
+Compute cnf s.
+Compute dnf s.
+Compute toCNF (cnf s).
+Compute toDNF (dnf s).
