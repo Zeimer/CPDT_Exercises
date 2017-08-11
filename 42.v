@@ -387,18 +387,25 @@ Proof.
   induction p; cbn.
 Abort.
 
+Inductive nel (A : Type) : Type :=
+    | singl : A -> nel A
+    | ncons : A -> nel A -> nel A.
+
+Arguments singl [A].
+Arguments ncons [A] _ _.
+
 Function toCNF' (p : nnf_prop) : cnf_prop :=
 match p with
     | nnf_var v => [[pos v]]
     | nnf_not v => [[neg v]]
     | nnf_and p1 p2 => toCNF' p1 ++ toCNF' p2
     | nnf_or p1 p2 =>
-        match distr_or p1, distr_or p2 with
+        match toCNF' p1, toCNF' p2 with
             | nnf_and p1_1 p1_2, p2' =>
                 nnf_and (nnf_or p1_1 p2') (nnf_or p1_2 p2')
             | p1', nnf_and p2_1 p2_2 =>
                 nnf_and (nnf_or p1' p2_1) (nnf_or p1' p2_2)
-            | p1', p2' => nnf_or p1' p2'
+            | p1', p2' => concat (p1' ++ p2')
         end
 end.
 
