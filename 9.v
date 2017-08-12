@@ -66,21 +66,6 @@ Abort.
 Require Import List.
 Import ListNotations.
 
-Theorem test1 :
-  forall A (ls1 ls2 : list A), ls1 ++ ls2 = ls2 ++ ls1.
-Proof.
-Abort.
-
-Theorem test2 :
-  forall A (ls1 ls2 : list A), length (ls1 ++ ls2 ) = length ls1 - length ls2.
-Proof.
-Abort.
-
-Theorem test3 :
-  forall A (ls : list A), length (rev ls) - 3 = 0.
-Proof.
-Abort.
-
 Fixpoint all_lists (n : nat) : list (list bool) :=
 match n with
     | 0 => [[]]
@@ -91,7 +76,44 @@ end.
 
 Compute all_lists 5.
 
+Definition all_pairs (n : nat) : list (list bool * list bool) :=
+  list_prod (all_lists n) (all_lists n).
+
+Ltac disprove' H l :=
+match l with
+    | [] => idtac
+    | (?h1, ?h2) :: ?t =>
+        try (specialize (H h1 h2); cbn in H; discriminate; fail);
+        disprove' H t
+end.
+
 Ltac disprove n :=
-match goal with
-  
+lazymatch goal with
+    | |- ?G : forall (A : Type) (l : list A), _ =>
+        assert (~ G);
+        [ let H := fresh "H" in intro H; specialize (H bool);
+          let l := constr:(all_pairs n) in
+          let l' := eval cbn in l in disprove' constr:(H) l'
+        | idtac ]
+end.
+
+
+Theorem test1 :
+  forall A (ls1 ls2 : list A), ls1 ++ ls2 = ls2 ++ ls1.
+Proof.
+  disprove 1.
+Abort.
+
+Theorem test2 :
+  forall A (ls1 ls2 : list A), length (ls1 ++ ls2 ) = length ls1 - length ls2.
+Proof.
+  disprove 1.
+Abort.
+
+Theorem test3 :
+  forall A (ls : list A), length (rev ls) - 3 = 0.
+Proof.
+  disprove 5. (* IMPROVE: make it works for any number of quantifiers,
+  not just 2. *)
+Abort.
 
