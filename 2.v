@@ -62,28 +62,84 @@ Inductive cmd : Set:=
     | cexp : exp -> cmd
     | asgn : var -> exp -> cmd -> cmd.
 
-Inductive val : exp -> Prop :=
-    | vconst : forall n : nat, val (econst n)
-    | vpair : forall e1 e2 : exp,
-        val e1 -> val e2 -> val (epair e1 e2).
+Inductive val : Set :=
+    | vconst : nat -> val
+    | vpair : val -> val -> val.
 
 Definition context : Set := var -> nat.
 
+Inductive eval (ctx : context) : exp -> val -> Prop :=
+    | eval_econst : forall (n : nat),
+        eval ctx (econst n) (vconst n)
+    | eval_eadd : forall (e1 e2 : exp) (n m : nat),
+        eval ctx e1 (vconst n) -> eval ctx e2 (vconst m) ->
+        eval ctx (eadd e1 e2) (vconst (n + m))
+    | eval_epair : forall (e1 e2 : exp) (v1 v2 : val),
+        eval ctx e1 v1 -> eval ctx e2 v2 ->
+        eval ctx (epair e1 e2) (vpair v1 v2)
+    | eval_efst : forall (e : exp) (v1 v2 : val),
+        eval ctx e (vpair v1 v2) ->
+        eval ctx (efst e) v1
+    | eval_esnd : forall (e : exp) (v1 v2 : val),
+        eval ctx e (vpair v1 v2) ->
+        eval ctx (esnd e) v2
+    | evar_evar : forall (v : var),
+        eval ctx (evar v) (vconst (ctx v)).
 
- Define a big-step evaluation relation eval, capturing what it means for an ex-
-pression to evaluate to a value under a particular variable assignment. “Big step”
-means that the evaluation of every expression should be proved with a single in-
-stance of the inductive predicate you will define. For instance, “1 + 1 evaluates
-to 2 under assignment va” should be derivable for any assignment va.
-(g) Define a big-step evaluation relation run, capturing what it means for a command
-to run to a value under a particular variable assignment. The value of a command
-is the result of evaluating its final expression.
-(h) Define a type of variable typings, which are like variable assignments, but map
-variables to types instead of values. You might use polymorphism to share some
-code with your variable assignments.
-(i) Define typing judgments for expressions, values, and commands. The expression
-and command cases will be in terms of a typing assignment.
-(j) Define a predicate varsType to express when a variable assignment and a variable
+Inductive run : context -> cmd -> val -> Prop :=
+    | run_cexp : forall (ctx : context) (e : exp) (v : val),
+        eval ctx e v -> run ctx (cexp e) v
+    | run_asgn : forall (ctx : context) (vr : var) (e : exp) (c : cmd)
+        (vl : val) (n : nat),
+          eval ctx e (vconst n) ->
+          run (fun v => if beq_nat v vr then n else ctx v) c vl ->
+          run ctx (asgn vr e c) vl.
+
+Inductive type : Set :=
+    | Nat : type
+    | Prod : type -> type -> type.
+
+Definition typing : Set := var -> type.
+
+Inductive exp_has_type (ctx : typing) : exp -> type -> Prop :=
+    | eht_econst : forall n : nat,
+        exp_has_type ctx (econst n) Nat
+    | eht_eadd : forall e1 e2 : exp,
+        exp_has_type ctx e1 Nat ->
+        exp_has_type ctx e2 Nat ->
+        exp_has_type ctx (eadd e1 e2) Nat
+    | eht_epair : forall (e1 e2 : exp) (t1 t2 : type),
+        exp_has_type ctx e1 t1 ->
+        exp_has_type ctx e2 t2 ->
+        exp_has_type ctx (epair e1 e2) (Prod t1 t2)
+    | eht_efst : forall (e : exp) (t1 t2 : type),
+        exp_has_type ctx e (Prod t1 t2) ->
+        exp_has_type ctx (efst e) t1
+    | eht_snd : forall (e : exp) (t1 t2 : type),
+        exp_has_type ctx e (Prod t1 t2) ->
+        exp_has_type ctx (esnd e) t2
+    | eht_evar : forall v : var,
+        exp_has_type ctx (evar v) (ctx v).
+
+Inductive val_has_type (ctx : typing) : val -> type -> Prop :=
+    | vht_vconst : forall n : nat,
+        val_has_type ctx (vconst n) Nat
+    | vht_vpair : forall (v1 v2 : val) (t1 t2 : type),
+        val_has_type ctx v1 t1 ->
+        val_has_type ctx v2 t2 ->
+        val_has_type ctx (vpair v1 v2) (Prod t1 t2).
+
+Inductive cmd_has_type (ctx : typing) : cmd -> type -> Prop :=
+    | cht_cexp : forall (e : exp) (t : type),
+        exp_has_type ctx e t ->
+        cmd_has_type ctx (cexp e) t
+    | cht_asgn : forall (v : var) (e : exp) (c : cmd) (t1 t2 : type),
+        ctx v = t1 ->
+        exp_has_type ctx e t1 ->
+        cmd_has_type (fun v' => if beq_nat v v' then t1 else ctx v) c t2 ->
+        cmd_has_type ctx (asgn v e c) t2.
+
+ a predicate varsType to express when a variable assignment and a variable
 typing agree on the types of variables.
 3
 (k) Prove that any expression that has type t under variable typing vt evaluates under

@@ -443,3 +443,38 @@ Compute dnf s.
 Compute dnf s'.
 
 Definition empty : var -> bool := fun _ => false.
+Check clause.
+
+(*Fixpoint cnf_dedup (c : clause) : clause :=
+match c with
+    | singl x => singl x
+    | ncons h t => *)
+
+Definition head {A : Type} (l : nel A) : A :=
+match l with
+    | singl h => h
+    | ncons h t => h
+end.
+
+Require Import Arith.
+
+(* Variable maps *)
+
+Definition varmap : Set := list (var * bool).
+
+Require Import FMapList.
+
+Search list.
+
+Definition satisfy_literal (l : literal) (truth : var -> bool):
+  option (var -> bool) :=
+match l with
+    | pos x => if beq_nat v x then true else false
+    | neg x => if beq_nat v x then false else true
+end.
+
+Fixpoint satisfy (p : cnf_prop) : option (var -> bool) :=
+match p with
+    | singl c => Some (satisfy_literal (head c))
+    | 
+end.
