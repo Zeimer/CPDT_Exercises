@@ -3,6 +3,47 @@ Set Implicit Arguments.
 Require Import List.
 Import ListNotations.
 
+Require Import JMeq.
+Require Import Nat.
+Require Import Omega.
+Require Import Relations_3.
+
+(* Tactics *)
+
+Ltac gen x := generalize dependent x.
+
+Ltac inv H := inversion H; subst.
+
+Ltac invs := repeat
+match goal with
+    | H : ?f ?x1 ?x2 ?x3 = ?f ?x1' ?x2' ?x3' |- _ => inv H
+    | H : ?f ?x1 ?x2 = ?f ?x1' ?x2' |- _ => inv H
+    | H : ?f ?x1 = ?f ?x1' |- _ => inv H
+end.
+
+Ltac remember_vars H :=
+match H with
+    | ?f ?x1 => is_var x1; remember_vars f
+    | ?f ?x1 =>
+        let x1' := fresh "x1" in
+        let H1 := fresh "H1" in remember x1 as x1' eqn: H1; remember_vars f
+    | _ => idtac
+end.
+
+Ltac clean_eqs := repeat
+match goal with
+    | H : ?x = ?x |- _ => clear H
+    | H : ?x = ?x -> _ |- _ => specialize (H eq_refl)
+    | H : forall x, ?y = ?y -> ?P |- _ =>
+        assert (H' := fun x => H x eq_refl); clear H; rename H' into H
+end.
+
+Ltac ind H :=
+match type of H with
+    | ?T => remember_vars T; induction H; subst; try congruence;
+        invs; clean_eqs; eauto
+end.
+
 (* Ex. 9.1 *)
 Inductive last {A : Type} (x : A) : list A -> Prop :=
     | last_singl : last x [x]
@@ -32,7 +73,6 @@ Qed.
     [last_fun] a trois cas de match, mais gráce á [functional
     induction] la preuve est facile en tous les deux directions. *)
 
-
 (* Ex. 9.2 *)
 Inductive palindrome {A : Type} : list A -> Prop :=
     | palindrome_nil : palindrome []
@@ -46,11 +86,7 @@ Inductive rtc {A : Type} (R : A -> A -> Prop) : A -> A -> Prop :=
     | rtc_refl : forall x : A, rtc R x x
     | rtc_trans : forall x y z : A, rtc R x y -> rtc R y z -> rtc R x z.
 
-Hint Constructors rtc.
-
-Require Import Relations_3.
-
-Hint Constructors Rstar.
+Hint Constructors rtc Rstar.
 
 Lemma Rstar_trans :
   forall (A : Type) (R : A -> A -> Prop), Transitive A (Rstar A R).
@@ -147,8 +183,6 @@ Proof.
 Qed.
 
 (* Ex. 9.8 *)
-Require Import JMeq.
-Require Import Nat.
 
 Functional Scheme add_ind := Induction for add Sort Prop.
 
@@ -165,8 +199,6 @@ Inductive even : nat -> Prop :=
     | evenSS : forall n : nat, even n -> even (S (S n)).
 
 Hint Constructors even.
-
-Require Import Omega.
 
 Theorem even_double :
   forall n : nat, even n -> exists m : nat, n = 2 * m.
@@ -445,6 +477,63 @@ Proof.
     cbn. rewrite IHl. trivial.
 Qed.
 
+Lemma wp_front :
+  forall l : list par, wp l -> wp (open :: close :: l).
+Proof.
+  intros. change (open :: close :: l) with ([open; close] ++ l). eauto.
+Qed.
+
+Function count (acc : nat) (l : list par) : option nat :=
+match l with
+    | [] => Some acc
+    | open :: l' => count (S acc) l'
+    | close :: l' =>
+        match acc with
+            | 0 => None
+            | S n' => count n' l'
+        end
+end.
+
+Lemma count_app :
+  forall (l l' : list par) (n m : nat),
+    count n l = Some m -> count n (l ++ l') = count m l'.
+Proof.
+  intros. functional induction count n l; cbn; eauto; congruence.
+Qed.
+
+Lemma count_plus :
+  forall (l : list par) (n m r : nat),
+    count n l = Some r -> count (n + m) l = Some (r + m).
+Proof.
+  intros. functional induction count n l; cbn in *; try congruence; eauto.
+Qed.
+
+Lemma count_wp_Aux :
+  forall (l : list par) (n : nat),
+    count n l = Some 0 -> wp (replicate n open ++ l).
+Proof.
+  intros. functional induction count n l; cbn in *.
+    inversion H; subst; auto.
+    replace (replicate acc open ++ open :: l')
+    with (open :: replicate acc open ++ l').
+      apply IHo. assumption.
+      rewrite app_comm_cons, replicate_rev, <- app_assoc. trivial.
+    inversion H.
+Abort.
+
+Theorem count_wp :
+  forall l : list par,
+    count 0 l = Some 0 <-> wp l.
+Proof.
+  split.
+    Focus 2. induction 1; cbn; auto.
+      rewrite (@count_app _ _ 1 1); cbn; auto.
+        apply (@count_plus _ 0 1 0). assumption.
+      erewrite count_app; eauto.
+    intros. remember 0 as n. functional induction count n l; cbn; auto.
+      functional inversion H; subst.
+Abort.
+
 Lemma wp_oc_new :
   forall l1 l2 : list par,
     wp (l1 ++ l2) -> wp (open :: l1 ++ close :: l2).
@@ -456,18 +545,10 @@ Proof.
       apply app_eq_nil. auto.
       destruct H. subst. auto.
     destruct l1 as [| [] t]; cbn in *.
+      rewrite <- Heql. apply wp_front. eauto.
+      inversion Heql; subst.
 Restart.
-  
 Admitted.
-
-Function recognize' (n : nat) (l : list par) : bool :=
-match n, l with
-    | 0, [] => true
-    | _, [] => false
-    | _, open :: l' => recognize (S n) l'
-    | 0, close :: _ => false
-    | S n', close :: l' => recognize n' l'
-end.
 
 Lemma recognize_sound_aux :
   forall (n : nat) (l : list par),
@@ -477,51 +558,176 @@ Proof.
     replace (replicate n open ++ open :: l')
     with (open :: replicate n open ++ l').
       apply IHb. assumption.
-      rewrite app_comm_cons, replicate_rev, <- app_assoc. trivial. Search wp.
+      rewrite app_comm_cons, replicate_rev, <- app_assoc. trivial.
     cbn. apply wp_oc_new. auto.
-Restart.
-  intros n l. generalize dependent n.
-  induction l as [| h t]; cbn.
-    destruct n as [| n']; cbn; inversion 1; auto.
-    destruct n as [| n'], h; cbn.
-      apply IHt.
-      inversion 1.
-      intros. replace (open :: replicate n' open ++ open :: t)
-        with (open :: (replicate n' open ++ [open]) ++ t).
-        rewrite <- replicate_rev. cbn. specialize (IHt _ H). apply IHt.
-        f_equal. rewrite <- app_assoc. cbn. trivial.
-        intros.
-Restart.
-  induction n as [| n'].
-    destruct l; cbn; inversion 1; auto. destruct p.
-Abort.
-
-Lemma recognize'_sound_aux :
-  forall (n : nat) (l : list par),
-    recognize' n l = true -> wp (replicate n open ++ l).
-Proof.
-  induction n as [| n'].
-    induction l as [| [] t]; cbn; auto.
-      destruct t.
-Restart.
-  intros. functional induction recognize' n l; cbn; auto. Print wp.
-    rewrite app_nil_r. destruct n; inversion y; congruence.
-    destruct l'; inversion H. destruct p. inversion H1.
-Abort.
+Qed.
 
 Theorem recognize_sound :
   forall l : list par, recognize 0 l = true -> wp l.
 Proof.
-  intros. remember 0 as n. generalize dependent Heqn.
-  functional induction recognize n l; intros; subst; auto.
-    remember 1 as m. functional induction recognize m l'; subst;
-    try congruence; try omega.
-Restart.
-  induction l as [| h t]; cbn; intros; auto.
-  destruct h.
-    destruct t; cbn in *.
-      inversion H.
-      destruct p.
+  intros. change l with (replicate 0 open ++ l).
+  apply recognize_sound_aux. assumption.
+Qed.
 
+(* Ex. 9.23 *)
+Function parse (s : list bin) (t : bin) (l : list par) : option bin :=
+match l with
+    | [] =>
+        match s with
+            | [] => Some t
+            | _ => None
+        end
+    | open :: l' => parse (t :: s) L l'
+    | close :: l' =>
+        match s with
+            | t' :: s' => parse s' (N t' t) l'
+            | _ => None
+        end
+end.
+
+Theorem parse_complete :
+  forall l : list par, wp l -> parse [] L l <> None.
+Proof.
+  induction 1; cbn.
+    congruence. Print parse.
+    destruct l as [| [] l']; cbn.
+      congruence.
+Restart.
 Abort.
 
+Theorem parse_invert :
+  forall (l : list par) (t : bin),
+    parse [] L l = Some t -> bin_to_string' t = l.
+Proof.
+Abort.
+
+Theorem parse_sound :
+  forall (l : list par) (t : bin), parse [] L l = Some t -> wp l.
+Proof.
+  intros. remember [] as acc. remember L as tr.
+  gen Heqtr; gen Heqacc.
+  functional induction parse acc tr l; cbn in *; intros; subst; auto.
+Abort.
+
+Section little_semantics.
+
+Variables Var aExp bExp : Set.
+
+Inductive instr : Set :=
+    | Skip : instr
+    | Assign : Var -> aExp -> instr
+    | Seq : instr -> instr -> instr
+    | While : bExp -> instr -> instr.
+
+Variable
+    (state : Set)
+    (update : state -> Var -> Z -> option state)
+    (evalA : state -> aExp -> option Z)
+    (evalB : state -> bExp -> option bool).
+
+Inductive exec : state -> instr -> state -> Prop :=
+    | execSkip : forall s : state, exec s Skip s
+    | execAssign : forall (s1 s2 : state) (v : Var) (a : aExp) (k : Z),
+        evalA s1 a = Some k -> update s1 v k = Some s2 ->
+        exec s1 (Assign v a) s2
+    | execSeq : forall (s1 s2 s3 : state) (i1 i2 : instr),
+        exec s1 i1 s2 -> exec s2 i2 s3 -> exec s1 (Seq i1 i2) s3
+    | execWhileTrue : forall (s1 s2 s3 : state) (i : instr) (be : bExp),
+        evalB s1 be = Some true -> exec s1 i s2 -> exec s2 (While be i) s3 ->
+        exec s1 (While be i) s3
+    | execWhileFalse : forall (s : state) (i : instr) (be : bExp),
+        evalB s be = Some false -> exec s (While be i) s.
+
+Hint Constructors instr exec.
+
+(* Ex. 9.25 TODO? *)
+Theorem HoareWhileRule :
+  forall (P : state -> Prop) (b : bExp) (i : instr) (s s' : state),
+    (forall s1 s2 : state, P s1 -> evalB s1 b = Some true ->
+      exec s1 i s2 -> P s2) -> P s -> exec s (While b i) s' -> P s' /\
+        evalB s' b = Some false.
+Proof.
+  intros. remember (While b i) as w.
+  induction H1; intros; inversion Heqw; subst; eauto.
+Restart.
+  intros. ind H1.
+  (* This proof is ~190 lines, which is ~40 lines less than the above. *)
+Qed.
+
+(* Ex. 9.26 *)
+Theorem ex9_26 :
+  forall (s : state) (be : bExp),
+    evalB s be = Some true ->
+      ~ exists s' : state, exec s (While be Skip) s'.
+Proof.
+  intros. destruct 1 as [s' Hs']. remember (While be Skip) as w.
+  gen be. induction Hs'; inversion 2; subst.
+    inversion Hs'1; subst. eauto.
+    rewrite H in H0. congruence.
+Qed.
+
+Theorem ex9_26' :
+  forall (s s' : state) (b : bExp),
+    exec s (While b Skip) s' -> evalB s b = Some true -> False.
+Proof.
+  intros. ind H. inv H2. eauto.
+Qed.
+
+Theorem HoareSeq :
+  forall (P : state -> Prop) (s1 s2 s3 : state) (i12 i23 : instr),
+    (forall s s' : state, P s -> exec s i12 s' -> P s') ->
+    (forall s s' : state, P s -> exec s i23 s' -> P s') ->
+      P s1 -> exec s1 (Seq i12 i23) s3 -> P s2.
+Proof.
+  intros. remember (Seq i12 i23) as w.
+  induction H2; inversion Heqw; subst. eauto.
+  
+
+(* Ex. 9.28 *)
+Goal ~ sorted le [1; 3; 2].
+Proof.
+  inversion 1; subst. inversion H4; subst. omega.
+Qed.
+
+(* Ex. 9.29 *)
+Fixpoint nat_ind_3
+  (P : nat -> Prop) (H0 : P 0) (H1 : P 1) (H2 : P 2)
+  (H3 : forall n : nat, P n -> P (3 + n)) (n : nat) : P n.
+Proof.
+  destruct n as [| [| [| n']]]; auto.
+  apply H3. apply nat_ind_3; auto.
+Qed.
+
+Theorem ex9_29 :
+  forall n : nat, exists a b : nat, 8 + n = 3 * a + 5 * b.
+Proof.
+  induction n using nat_ind_3.
+    exists 1, 1; trivial.
+    exists 3, 0; trivial.
+    exists 0, 2; trivial.
+    destruct IHn as [a [b IH]]. exists (S a), b. omega.
+Qed.
+
+Theorem ex9_29_v2 :
+  forall n : nat, 8 <= n -> exists a b : nat,
+    n = 3 * a + 5 * b.
+Proof.
+  induction n using lt_wf_ind; intros.
+  assert (n = 8 \/ n = 9 \/ n = 10 \/ 11 <= n). omega.
+  destruct H1 as [H1 | [H1 | [H1 | H1]]].
+    exists 1, 1; trivial.
+    exists 3, 0; trivial.
+    exists 0, 2; trivial.
+    destruct (H (n - 3)) as [a [b IH]]; try omega. exists (S a), b. omega.
+Qed.
+
+Theorem ex9_29_v3 :
+  forall n : nat, exists a b : nat, 8 + n = 3 * a + 5 * b.
+Proof.
+  induction n using lt_wf_ind; intros.
+  destruct n as [| [| [| n']]].
+    exists 1, 1; trivial.
+    exists 3, 0; trivial.
+    exists 0, 2; trivial.
+    destruct (H n') as [a [b IH]]; try omega. exists (S a), b. omega.
+Qed.
