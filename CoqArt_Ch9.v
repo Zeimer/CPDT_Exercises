@@ -38,11 +38,39 @@ match goal with
         assert (H' := fun x => H x eq_refl); clear H; rename H' into H
 end.
 
-Ltac ind H :=
+Ltac ind' H :=
 match type of H with
     | ?T => remember_vars T; induction H; subst; try congruence;
         invs; clean_eqs; eauto
 end.
+
+Ltac term_contains t x :=
+match t with
+    | ?f x => idtac
+    | ?f _ => term_contains f x
+    | x => idtac
+    | _ => fail
+end.
+
+(*Ltac term_not_contains t x :=
+match t with
+    | ?f x => idtac f; fail
+    | ?f _ => term_not_contains f x
+    | x => fail
+    | _ => idtac
+end.*)
+
+Ltac gen_ind H :=
+match reverse goal with
+    | H : _ |- _ => fail
+    | x : ?Tx |- _ =>
+        match type of H with
+            | ?TH => (unify TH Tx + term_contains TH x); idtac
+            | _ => generalize dependent x
+        end
+end.
+
+Ltac ind H := try intros until H; gen_ind H; ind' H.
 
 (* Ex. 9.1 *)
 Inductive last {A : Type} (x : A) : list A -> Prop :=
@@ -588,11 +616,14 @@ end.
 Theorem parse_complete :
   forall l : list par, wp l -> parse [] L l <> None.
 Proof.
+  intros. ind H; cbn. congruence.
   induction 1; cbn.
-    congruence. Print parse.
-    destruct l as [| [] l']; cbn.
-      congruence.
 Restart.
+  intros. remember [] as acc. remember L as wut.
+  functional induction @parse acc wut l; subst.
+    congruence.
+    inv y.
+    Focus 3. inv H.
 Abort.
 
 Theorem parse_invert :
@@ -611,7 +642,7 @@ Abort.
 
 Section little_semantics.
 
-Variables Var aExp bExp : Set.
+Axioms Var aExp bExp : Set.
 
 Inductive instr : Set :=
     | Skip : instr
@@ -619,11 +650,11 @@ Inductive instr : Set :=
     | Seq : instr -> instr -> instr
     | While : bExp -> instr -> instr.
 
-Variable
-    (state : Set)
-    (update : state -> Var -> Z -> option state)
-    (evalA : state -> aExp -> option Z)
-    (evalB : state -> bExp -> option bool).
+Axiom
+  (state : Set)
+  (update : state -> Var -> Z -> option state)
+  (evalA : state -> aExp -> option Z)
+  (evalB : state -> bExp -> option bool).
 
 Inductive exec : state -> instr -> state -> Prop :=
     | execSkip : forall s : state, exec s Skip s
@@ -640,7 +671,7 @@ Inductive exec : state -> instr -> state -> Prop :=
 
 Hint Constructors instr exec.
 
-(* Ex. 9.25 TODO? *)
+(* Ex. 9.25 *)
 Theorem HoareWhileRule :
   forall (P : state -> Prop) (b : bExp) (i : instr) (s s' : state),
     (forall s1 s2 : state, P s1 -> evalB s1 b = Some true ->
@@ -651,7 +682,6 @@ Proof.
   induction H1; intros; inversion Heqw; subst; eauto.
 Restart.
   intros. ind H1.
-  (* This proof is ~190 lines, which is ~40 lines less than the above. *)
 Qed.
 
 (* Ex. 9.26 *)
@@ -664,6 +694,8 @@ Proof.
   gen be. induction Hs'; inversion 2; subst.
     inversion Hs'1; subst. eauto.
     rewrite H in H0. congruence.
+Restart.
+  intros s be H [s' Hs']. ind Hs'. inv Hs'1. auto.
 Qed.
 
 Theorem ex9_26' :
@@ -677,11 +709,10 @@ Theorem HoareSeq :
   forall (P : state -> Prop) (s1 s2 s3 : state) (i12 i23 : instr),
     (forall s s' : state, P s -> exec s i12 s' -> P s') ->
     (forall s s' : state, P s -> exec s i23 s' -> P s') ->
-      P s1 -> exec s1 (Seq i12 i23) s3 -> P s2.
+      P s1 -> exec s1 (Seq i12 i23) s3 -> P s3.
 Proof.
-  intros. remember (Seq i12 i23) as w.
-  induction H2; inversion Heqw; subst. eauto.
-  
+  intros. ind H2.
+Qed.
 
 (* Ex. 9.28 *)
 Goal ~ sorted le [1; 3; 2].
